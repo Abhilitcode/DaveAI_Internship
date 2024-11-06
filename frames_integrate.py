@@ -4,61 +4,37 @@ import random
 import librosa
 from copy import deepcopy
 
-sys.path.append(os.getcwd())
-import common as com
+# # Append the current directory (where frames.py is located)
+# sys.path.append(os.getcwd())
+
+print("Current working directory:", os.getcwd())
+
+# Explicitly add the path to the synthesis_main directory
+project_root = "/mnt/c/Users/HP/Downloads/DaveAI INTERNSHIP/synthesis_main"
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Add site-packages for the current conda environment to sys.path
+conda_site_packages = os.path.join(sys.prefix, "lib", "python3.10", "site-packages")
+if conda_site_packages not in sys.path:
+    sys.path.append(conda_site_packages)
+
+# Print sys.path to check if the paths are included
+print("sys.path:", sys.path)
+
+# Attempt to import common using an absolute path
+common_path = "/mnt/c/Users/HP/Downloads/DaveAI INTERNSHIP/synthesis_main/common.py"
+if os.path.exists(common_path):
+    sys.path.append(os.path.dirname(common_path))  # Add the directory containing common.py
+    import common as com
+    print("common module imported successfully")
+else:
+    print(f"{common_path} not found. Please check the file location.")
+
+
 
 logger = com.get_logger(__name__)
 FRAMES_DEFAULTS = com.read_file(f"{com.ASSETS}/frames_defaults.json", logger)
-
-
-class GestureSelector:
-    def __init__(self, gestures_dict):
-        self.gestures = gestures_dict
-        self.organized_gesture = {}
-        self.organized_by_groups()
-
-    def organized_by_groups(self):
-        for gesture, details in self.gestures.items():
-            group = details.get("group", "default")  # Default group if not specified
-            if group not in self.organized_gesture:
-                self.organized_gesture[group] = {}
-            self.organized_gesture[group][gesture] = {
-                "frames": details["frames"],
-                "weights": details["weights"]
-            }
-
-    def gesture_time_range(self, time_range, frame_rate=25):
-        selected_gestures = []
-        total_frames = time_range * frame_rate  # Convert total time range to frames
-
-        for group, gestures in self.organized_gesture.items():
-            group_selected_gestures = []
-            remaining_frames = total_frames
-            start_time = 0
-
-            # Continuously select gestures until the group's time range is filled
-            while remaining_frames > 0:
-                gesture_names = list(gestures.keys())
-                weights = [details['weights'] for details in gestures.values()]
-
-                # Randomly choose a gesture based on weights
-                chosen_gesture = random.choices(gesture_names, weights)[0]
-                chosen_details = gestures[chosen_gesture]
-                frames = chosen_details['frames']
-
-                # If the gesture fits within the remaining frames, append it
-                if frames <= remaining_frames:
-                    end_time = start_time + frames / frame_rate
-                    group_selected_gestures.append([start_time, chosen_gesture])
-                    start_time = end_time
-                    remaining_frames -= frames
-                else:
-                    # If gesture doesn't fit, break the loop
-                    break
-
-            selected_gestures.extend(group_selected_gestures)
-
-        return selected_gestures
 
 class Frames:
     def __init__(self, voice_path: str, phonemes_path: str, **kwargs):
@@ -188,18 +164,32 @@ class Frames:
         return g, gestures
 
     def _non_context_gestures(self, time_ranges: list, talk_head: bool):
-        # this is a source of gestures based on whether 'talk_head' r used.
-        gesture_source = self._talk_head if talk_head else self._non_talk_head     
-        for time_range in time_ranges:
-            duration = time_range[1] - time_range[0]
-            
-            # list of gestures that fit within the duration
-            selected_gestures = self.gesture_selector.gesture_time_range(duration, self.frame_rate)
-            start_time = time_range[0]
-            
-            # now i will Loop through each gesture and its timestamp within the selected gestures.
-            for t, gesture in selected_gestures:
-                self.frames_list.append([round(start_time + t, 2), gesture])
+        if talk_head:
+            gest = self._talk_head.copy()
+        else:
+            gest = self._non_talk_head.copy()
+        
+        sorted_times = sorted(time_ranges, key=lambda x: x[1] - x[0])
+        new_time_ranges = {tuple(v): v[1]-v[0] for v in sorted_times}
+        for k, v in new_time_ranges.items():
+            l = self._fit_list(v, gest)
+            if not l:
+                ge = gest.copy()
+                l = self._fit_list(v, ge)
+                if not l:
+                    continue
+                gest = ge
+
+            l = random.sample(l, len(l))
+            if talk_head:
+                ge, gest = self._generate_combo_talk_head(l, v, gest)
+            else:
+                ge, gest = self._generate_combo(l, v, gest)
+            sta = k[0]
+            for g in ge:
+                self.frames_list.append([round(sta, 2), g])
+                sta+=self.non_context_gestures[g]["duration"]
+
 
     def _context_gestures(self):
         non_context_ranges = []
@@ -256,8 +246,9 @@ class Frames:
 
 if __name__=="__main__":
     import os
-    base_dir = "static/uploads/3475c3e75ab03cd9a53b1bcc78193832/c358a7ac3ae73ebbaff56728f9da1f11_arabic-male"
+    base_dir = "voice_files"  # Updated the correct path
+    # base_dir = "static/uploads/3475c3e75ab03cd9a53b1bcc78193832/c358a7ac3ae73ebbaff56728f9da1f11_arabic-male"
     v = os.path.join(base_dir, "voice.wav")
     p = os.path.join(base_dir, "phonemes.csv")
-    f = Frames(v, p, default_gestures="new_male")
+    f = Frames(v, p, default_gestures="male")
     print(f.frames())
